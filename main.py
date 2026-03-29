@@ -25,72 +25,66 @@ from ui import StatsWindow, SettingsWindow
 
 # ── Icon generation ──────────────────────────────────────────────────────────
 
-_BRAND   = (204, 120,  92)   # Anthropic terra-cotta
-_GREEN   = ( 80, 200, 120)
-_YELLOW  = (249, 200,  80)
-_RED     = (240,  80,  80)
-_BG      = ( 30,  30,  30)
-_FG      = (255, 255, 255)
+_BRAND  = (204, 120,  92)   # Anthropic terra-cotta
+_FG     = (255, 255, 255)
+
+# Color thresholds per user spec
+_GREEN  = ( 76, 175,  80)   #  0 – 50 %
+_YELLOW = (255, 213,  79)   # 51 – 75 %
+_ORANGE = (255, 138,  61)   # 76 – 85 %
+_RED    = (229,  57,  53)   # 86 – 100%
 
 
 def _pct_color(pct: float) -> tuple:
-    if pct >= 80:
+    if pct > 85:
         return _RED
-    if pct >= 55:
+    if pct > 75:
+        return _ORANGE
+    if pct > 50:
         return _YELLOW
     return _GREEN
 
 
-def _make_icon(pct: float | None = None, size: int = 64) -> Image.Image:
+# Render at high resolution so Windows scales it sharply to tray size
+_ICON_SIZE = 256
+
+
+def _make_icon(pct: float | None = None) -> Image.Image:
     """
-    Draws a circular progress ring showing session usage %.
-    If pct is None, shows the brand 'C' logo instead.
+    Renders a 256×256 icon — Windows scales it down cleanly to ~20px tray size.
+    - No pct: Anthropic brand circle with 'C'
+    - With pct: bold percentage number on a colored rounded-rect background
     """
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    S = _ICON_SIZE
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    cx = cy = size // 2
-    margin = max(3, size // 12)
-    r_outer = cx - margin
-    ring_w  = max(4, size // 10)
-    r_inner = r_outer - ring_w
+    pad = S // 16
+    radius = S // 5
 
     if pct is None:
-        # Brand logo — solid circle with "C"
-        draw.ellipse([(margin, margin), (size - margin, size - margin)],
-                     fill=_BRAND)
-        _draw_centered_text(draw, "C", size, _FG, size // 3)
-        return img
+        # Brand logo
+        draw.rounded_rectangle([(pad, pad), (S - pad, S - pad)],
+                                radius=radius, fill=_BRAND)
+        _draw_centered(draw, "C", S, _FG, int(S * 0.52))
+    else:
+        bg = _pct_color(pct)
+        draw.rounded_rectangle([(pad, pad), (S - pad, S - pad)],
+                                radius=radius, fill=bg)
 
-    # Dark background circle
-    draw.ellipse([(margin, margin), (size - margin, size - margin)],
-                 fill=_BG)
-
-    # Track ring (dim)
-    draw.ellipse([(margin, margin), (size - margin, size - margin)],
-                 outline=(60, 60, 60), width=ring_w)
-
-    # Progress arc
-    arc_color = _pct_color(pct)
-    start_angle = -90
-    end_angle   = start_angle + (pct / 100) * 360
-    if pct > 0:
-        draw.arc([(margin, margin), (size - margin, size - margin)],
-                 start=start_angle, end=end_angle,
-                 fill=arc_color, width=ring_w)
-
-    # Percentage label in the center
-    label = f"{int(pct)}%"
-    font_size = size // 4 if pct < 100 else size // 5
-    _draw_centered_text(draw, label, size, _FG, font_size)
+        label = f"{int(pct)}%"
+        # Fit font size to label length
+        font_size = int(S * 0.44) if len(label) <= 3 else int(S * 0.34)
+        _draw_centered(draw, label, S, _FG, font_size)
 
     return img
 
 
-def _draw_centered_text(draw: ImageDraw.ImageDraw, text: str,
-                        size: int, color: tuple, font_size: int) -> None:
+def _draw_centered(draw: ImageDraw.ImageDraw, text: str,
+                   size: int, color: tuple, font_size: int) -> None:
     font = None
-    for name in ("segoeui.ttf", "arial.ttf", "DejaVuSans.ttf"):
+    for name in ("arialbd.ttf", "Arial Bold.ttf", "arial.ttf",
+                 "segoeui.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans.ttf"):
         try:
             font = ImageFont.truetype(name, font_size)
             break
