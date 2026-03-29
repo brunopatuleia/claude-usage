@@ -80,6 +80,19 @@ def _make_icon(pct: float | None = None) -> Image.Image:
     return img
 
 
+def _make_icon_label(label: str) -> Image.Image:
+    """Brand-colored icon showing a custom label (e.g. today's message count)."""
+    S = _ICON_SIZE
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    pad = S // 16
+    draw.rounded_rectangle([(pad, pad), (S - pad, S - pad)],
+                            radius=S // 5, fill=_BRAND)
+    font_size = int(S * 0.44) if len(label) <= 2 else int(S * 0.34) if len(label) <= 3 else int(S * 0.26)
+    _draw_centered(draw, label, S, _FG, font_size)
+    return img
+
+
 def _draw_centered(draw: ImageDraw.ImageDraw, text: str,
                    size: int, color: tuple, font_size: int) -> None:
     font = None
@@ -175,10 +188,14 @@ class TrayApp:
 
         if plan.get("logged_in") and not plan.get("error"):
             pct = plan.get("session_pct")
+            icon = _make_icon(pct)
         else:
-            pct = None
+            # Show today's message count instead
+            msgs = local.get("today", {}).get("total_messages", 0)
+            label = str(msgs) if msgs < 1000 else f"{msgs//1000}K"
+            icon = _make_icon_label(label)
 
-        self._tray.icon  = _make_icon(pct)
+        self._tray.icon = icon
         self._tray.title = _build_tooltip(local, plan)
 
     def _build_menu(self) -> pystray.Menu:

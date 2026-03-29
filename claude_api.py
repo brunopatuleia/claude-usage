@@ -13,30 +13,39 @@ CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
 API_BASE = "https://claude.ai/api"
 
 
-def _load_token() -> Optional[str]:
-    if not CREDENTIALS_FILE.exists():
-        return None
-    try:
-        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
-            creds = json.load(f)
-        return creds.get("claudeAiOauth", {}).get("accessToken")
-    except (json.JSONDecodeError, OSError):
-        return None
+TRAY_CONFIG_FILE = Path.home() / ".claude-tray" / "settings.json"
 
 
-def _get(path: str, token: str) -> dict:
+def _load_session_key() -> Optional[str]:
+    """
+    Returns the claude.ai sessionKey cookie if the user has configured it.
+    This is separate from the OAuth token — it comes from the browser session.
+    """
+    if TRAY_CONFIG_FILE.exists():
+        try:
+            with open(TRAY_CONFIG_FILE, encoding="utf-8") as f:
+                cfg = json.load(f)
+            sk = cfg.get("session_key", "").strip()
+            if sk:
+                return sk
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _get(path: str, session_key: str) -> dict:
     url = f"{API_BASE}{path}"
     req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "User-Agent": "ClaudeUsageTray/1.0",
+        "Cookie": f"sessionKey={session_key}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/json",
+        "Referer": "https://claude.ai/",
     })
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read().decode())
 
 
-def fetch_plan_usage() -> dict:
+def fetch_plan_usage(session_key: Optional[str] = None) -> dict:
     """
     Returns a dict with:
       - logged_in: bool
@@ -50,25 +59,19 @@ def fetch_plan_usage() -> dict:
       - subscription_type: str
       - error: str | None
     """
-    token = _load_token()
-    if not token:
-        return {"logged_in": False, "error": "No credentials found"}
+    sk = session_key or _load_session_key()
+    if not sk:
+        return {"logged_in": False, "error": "No session key — paste it in Settings"}
 
     try:
-        data = _get("/account_billing_data", token)
-        return _parse_billing(data, token)
+        data = _get("/account", sk)
+        return _parse_billing(data, sk)
     except urllib.error.HTTPError as e:
-        if e.code == 401:
-            return {"logged_in": False, "error": "Token expired — please re-login in Claude Code"}
-        return {"logged_in": True, "error": f"HTTP {e.code}"}
+        if e.code in (401, 403):
+            return {"logged_in": False, "error": "Session expired — update the key in Settings"}
+        return {"logged_in": False, "error": f"HTTP {e.code}"}
     except Exception as exc:
-        # Try alternate endpoint
-        try:
-            data = _get("/usage_limits", token)
-            return _parse_billing(data, token)
-        except Exception:
-            pass
-        return {"logged_in": True, "error": str(exc)}
+        return {"logged_in": False, "error": str(exc)}
 
 
 def _parse_billing(data: dict, token: str) -> dict:

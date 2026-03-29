@@ -13,6 +13,7 @@ DEFAULTS = {
     "start_minimized": True,
     "show_notifications": True,
     "theme": "dark",           # "dark" | "light"
+    "session_key": "",         # claude.ai sessionKey cookie (for plan usage %)
 }
 
 CONFIG_DIR = Path.home() / ".claude-tray"

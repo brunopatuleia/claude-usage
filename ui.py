@@ -166,19 +166,21 @@ class StatsWindow:
             banner.pack(fill="x", padx=16, pady=(0, 12))
             inner = ctk.CTkFrame(banner, fg_color="transparent")
             inner.pack(fill="x", padx=14, pady=10)
-            ctk.CTkLabel(inner, text="Connect your Anthropic account",
+            ctk.CTkLabel(inner, text="See live session & weekly usage",
                          font=ctk.CTkFont(size=13, weight="bold"),
                          text_color=BRAND).pack(anchor="w")
-            ctk.CTkLabel(inner, text="Add your API key to see live cost & usage from the Anthropic Console.",
+            err = plan.get("error", "")
+            msg = err if err else "Paste your claude.ai sessionKey cookie in Settings to see plan usage %."
+            ctk.CTkLabel(inner, text=msg,
                          font=ctk.CTkFont(size=11), text_color="gray",
                          wraplength=340, justify="left").pack(anchor="w", pady=(2, 8))
             btn_row = ctk.CTkFrame(inner, fg_color="transparent")
             btn_row.pack(anchor="w")
-            ctk.CTkButton(btn_row, text="Open Anthropic Console", width=180, height=30,
+            ctk.CTkButton(btn_row, text="Open claude.ai", width=140, height=30,
                           fg_color=BRAND, hover_color=BRAND_HOVER,
                           font=ctk.CTkFont(size=12),
-                          command=lambda: webbrowser.open(ANTHROPIC_CONSOLE_URL)).pack(side="left")
-            ctk.CTkButton(btn_row, text="Enter API Key", width=110, height=30,
+                          command=lambda: webbrowser.open("https://claude.ai")).pack(side="left")
+            ctk.CTkButton(btn_row, text="Add Session Key", width=130, height=30,
                           fg_color="gray30", hover_color="gray40",
                           font=ctk.CTkFont(size=12),
                           command=self._open_settings).pack(side="left", padx=(8, 0))
@@ -387,29 +389,40 @@ class SettingsWindow:
         _sub_label(ds, "Leave blank to use the default ~/.claude directory").pack(
             anchor="w", padx=14, pady=(0, 12))
 
-        # ── Credentials card
+        # ── Session key card
         cred = _card(outer)
         cred.pack(fill="x", padx=16, pady=(0, 12))
-        _section_label(cred, "ANTHROPIC CREDENTIALS").pack(anchor="w", padx=14, pady=(12, 10))
+        _section_label(cred, "CLAUDE.AI SESSION").pack(anchor="w", padx=14, pady=(12, 10))
 
-        ctk.CTkLabel(cred, text="API Key",
+        ctk.CTkLabel(cred, text="Session Key",
                      font=ctk.CTkFont(size=13)).pack(anchor="w", padx=14)
-        self._apikey_var = tk.StringVar(value=self.settings.get("api_key", ""))
-        ctk.CTkEntry(cred, textvariable=self._apikey_var,
-                     placeholder_text="sk-ant-...",
-                     show="•").pack(fill="x", padx=14, pady=(4, 2))
-        _sub_label(cred, "Optional — used to fetch live usage & cost from the Anthropic API").pack(
-            anchor="w", padx=14)
+        self._sessionkey_var = tk.StringVar(value=self.settings.get("session_key", ""))
+        self._sk_entry = ctk.CTkEntry(cred, textvariable=self._sessionkey_var,
+                                      placeholder_text="Paste your sessionKey cookie here",
+                                      show="•")
+        self._sk_entry.pack(fill="x", padx=14, pady=(4, 2))
 
-        # Show/hide key toggle
-        self._show_key = False
-        self._key_entry_ref = cred.winfo_children()[-2]  # the entry above
-
-        ctk.CTkButton(cred, text="Show / Hide key", height=28,
+        btn_row_sk = ctk.CTkFrame(cred, fg_color="transparent")
+        btn_row_sk.pack(fill="x", padx=14, pady=(4, 4))
+        ctk.CTkButton(btn_row_sk, text="Show / Hide", width=100, height=26,
                       fg_color="gray30", hover_color="gray40",
-                      font=ctk.CTkFont(size=12),
-                      command=lambda: self._toggle_key_vis()).pack(
-                          anchor="w", padx=14, pady=(4, 12))
+                      font=ctk.CTkFont(size=11),
+                      command=self._toggle_sk_vis).pack(side="left")
+        ctk.CTkButton(btn_row_sk, text="Open claude.ai", width=120, height=26,
+                      fg_color=BRAND, hover_color=BRAND_HOVER,
+                      font=ctk.CTkFont(size=11),
+                      command=lambda: webbrowser.open("https://claude.ai")).pack(side="left", padx=(8, 0))
+
+        instructions = (
+            "How to get your Session Key:\n"
+            "1. Open claude.ai in your browser and log in\n"
+            "2. Press F12 → Application → Cookies → claude.ai\n"
+            "3. Copy the value of the  sessionKey  cookie\n"
+            "4. Paste it above and click Save"
+        )
+        ctk.CTkLabel(cred, text=instructions, font=ctk.CTkFont(size=11),
+                     text_color="gray", justify="left",
+                     wraplength=400).pack(anchor="w", padx=14, pady=(6, 12))
 
         # ── Buttons
         btn_row = ctk.CTkFrame(outer, fg_color="transparent")
@@ -423,13 +436,9 @@ class SettingsWindow:
 
         win.mainloop()
 
-    def _toggle_key_vis(self) -> None:
-        self._show_key = not self._show_key
-        # find the CTkEntry for the api key
-        try:
-            self._key_entry_ref.configure(show="" if self._show_key else "•")
-        except Exception:
-            pass
+    def _toggle_sk_vis(self) -> None:
+        self._show_sk = not getattr(self, "_show_sk", False)
+        self._sk_entry.configure(show="" if self._show_sk else "•")
 
     def _browse(self) -> None:
         from tkinter import filedialog
@@ -448,7 +457,7 @@ class SettingsWindow:
         updated["theme"] = self._theme_var.get().lower()
         updated["start_minimized"] = self._minimized_var.get()
         updated["show_notifications"] = self._notif_var.get()
-        updated["api_key"] = self._apikey_var.get().strip()
+        updated["session_key"] = self._sessionkey_var.get().strip()
         config.save(updated)
         win.destroy()
         self.on_save(updated)
