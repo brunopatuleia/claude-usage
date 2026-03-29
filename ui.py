@@ -1,280 +1,252 @@
 """
-ui.py — Stats window and Settings window (tkinter)
+ui.py — Stats window and Settings window (customtkinter)
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+import customtkinter as ctk
+import webbrowser
 from typing import Callable
 
 import config
 from reader import shorten_model, fmt_tokens
 
-# ── colour palette ──────────────────────────────────────────────────────────
-DARK = {
-    "bg": "#1e1e2e",
-    "bg2": "#2a2a3e",
-    "bg3": "#313145",
-    "fg": "#cdd6f4",
-    "fg2": "#a6adc8",
-    "accent": "#cba6f7",
-    "green": "#a6e3a1",
-    "yellow": "#f9e2af",
-    "red": "#f38ba8",
-    "blue": "#89b4fa",
-    "border": "#45475a",
-}
+ANTHROPIC_CONSOLE_URL = "https://console.anthropic.com/"
 
-LIGHT = {
-    "bg": "#f5f5f5",
-    "bg2": "#ebebeb",
-    "bg3": "#dcdcdc",
-    "fg": "#1e1e2e",
-    "fg2": "#555576",
-    "accent": "#7c3aed",
-    "green": "#16a34a",
-    "yellow": "#d97706",
-    "red": "#dc2626",
-    "blue": "#2563eb",
-    "border": "#c4c4d4",
-}
+# ── Theme setup ──────────────────────────────────────────────────────────────
+
+BRAND = "#CC785C"        # Anthropic terra-cotta
+BRAND_HOVER = "#B8664A"
+
+def _apply_appearance(settings: dict) -> None:
+    theme = settings.get("theme", "dark")
+    ctk.set_appearance_mode(theme)
+    ctk.set_default_color_theme("blue")
 
 
-def _palette(settings: dict) -> dict:
-    return DARK if settings.get("theme", "dark") == "dark" else LIGHT
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _section_label(parent, text: str) -> ctk.CTkLabel:
+    return ctk.CTkLabel(parent, text=text, font=ctk.CTkFont(size=11, weight="bold"),
+                        text_color=BRAND)
 
 
-def _apply_theme(root: tk.Tk, c: dict) -> None:
-    root.configure(bg=c["bg"])
-    style = ttk.Style(root)
-    style.theme_use("clam")
-    style.configure(".", background=c["bg"], foreground=c["fg"],
-                    fieldbackground=c["bg2"], bordercolor=c["border"],
-                    troughcolor=c["bg2"], font=("Segoe UI", 10))
-    style.configure("TLabel", background=c["bg"], foreground=c["fg"])
-    style.configure("Accent.TLabel", background=c["bg"], foreground=c["accent"],
-                    font=("Segoe UI", 10, "bold"))
-    style.configure("Header.TLabel", background=c["bg"], foreground=c["fg"],
-                    font=("Segoe UI", 12, "bold"))
-    style.configure("Sub.TLabel", background=c["bg"], foreground=c["fg2"],
-                    font=("Segoe UI", 9))
-    style.configure("TFrame", background=c["bg"])
-    style.configure("Card.TFrame", background=c["bg2"])
-    style.configure("TButton", background=c["bg3"], foreground=c["fg"],
-                    bordercolor=c["border"], focuscolor=c["accent"],
-                    font=("Segoe UI", 10))
-    style.map("TButton", background=[("active", c["bg3"]), ("pressed", c["border"])])
-    style.configure("TEntry", fieldbackground=c["bg2"], foreground=c["fg"],
-                    insertcolor=c["fg"], bordercolor=c["border"])
-    style.configure("TSpinbox", fieldbackground=c["bg2"], foreground=c["fg"],
-                    arrowcolor=c["fg2"], bordercolor=c["border"])
-    style.configure("TCombobox", fieldbackground=c["bg2"], foreground=c["fg"],
-                    arrowcolor=c["fg2"], bordercolor=c["border"])
-    style.configure("Separator.TSeparator", background=c["border"])
+def _value_label(parent, text: str, size: int = 22) -> ctk.CTkLabel:
+    return ctk.CTkLabel(parent, text=text, font=ctk.CTkFont(size=size, weight="bold"))
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
-def _card(parent, c: dict) -> ttk.Frame:
-    f = ttk.Frame(parent, style="Card.TFrame", padding=12)
-    return f
+def _sub_label(parent, text: str) -> ctk.CTkLabel:
+    return ctk.CTkLabel(parent, text=text, font=ctk.CTkFont(size=11),
+                        text_color="gray")
 
 
-def _lbl(parent, text, style="TLabel", **kw) -> ttk.Label:
-    return ttk.Label(parent, text=text, style=style, **kw)
+def _card(parent) -> ctk.CTkFrame:
+    return ctk.CTkFrame(parent, corner_radius=10)
 
 
-def _sep(parent, c: dict) -> None:
-    tk.Frame(parent, height=1, bg=c["border"]).pack(fill="x", pady=6)
+def _divider(parent) -> ctk.CTkFrame:
+    return ctk.CTkFrame(parent, height=1, fg_color="gray30", corner_radius=0)
 
 
 # ── Stats Window ─────────────────────────────────────────────────────────────
 
 class StatsWindow:
-    def __init__(self, settings: dict, data: dict, on_settings: Callable,
-                 on_refresh: Callable) -> None:
+    def __init__(self, settings: dict, data: dict,
+                 on_settings: Callable, on_refresh: Callable) -> None:
         self.settings = settings
         self.data = data
         self.on_settings = on_settings
         self.on_refresh = on_refresh
-        self.root: tk.Tk | None = None
+        self._win: ctk.CTk | None = None
 
     def show(self) -> None:
-        if self.root and self.root.winfo_exists():
-            self.root.lift()
-            self.root.focus_force()
+        if self._win and self._win.winfo_exists():
+            self._win.lift()
+            self._win.focus_force()
             return
         self._build()
 
     def update_data(self, data: dict) -> None:
         self.data = data
-        if self.root and self.root.winfo_exists():
-            self.root.destroy()
+        if self._win and self._win.winfo_exists():
+            self._win.destroy()
             self._build()
 
     def _build(self) -> None:
-        c = _palette(self.settings)
-        root = tk.Tk()
-        root.title("Claude Code Usage")
-        root.configure(bg=c["bg"])
-        root.resizable(False, False)
-        root.geometry("420x560")
+        _apply_appearance(self.settings)
 
-        # Centre on screen
-        root.update_idletasks()
-        sw = root.winfo_screenwidth()
-        sh = root.winfo_screenheight()
-        x = (sw - 420) // 2
-        y = (sh - 560) // 2
-        root.geometry(f"420x560+{x}+{y}")
+        win = ctk.CTk()
+        win.title("Claude Code Usage")
+        win.geometry("440x580")
+        win.resizable(False, False)
+        win.update_idletasks()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        win.geometry(f"440x580+{(sw-440)//2}+{(sh-580)//2}")
+        self._win = win
 
-        _apply_theme(root, c)
-        self.root = root
-
-        outer = ttk.Frame(root, padding=16)
-        outer.pack(fill="both", expand=True)
+        scroll = ctk.CTkScrollableFrame(win, corner_radius=0)
+        scroll.pack(fill="both", expand=True, padx=0, pady=0)
+        scroll.grid_columnconfigure(0, weight=1)
 
         # ── Header
-        hdr = ttk.Frame(outer)
-        hdr.pack(fill="x", pady=(0, 10))
-        _lbl(hdr, "Claude Code Usage", style="Header.TLabel").pack(side="left")
+        hdr = ctk.CTkFrame(scroll, fg_color="transparent")
+        hdr.pack(fill="x", padx=16, pady=(16, 4))
+
+        ctk.CTkLabel(hdr, text="Claude Code Usage",
+                     font=ctk.CTkFont(size=20, weight="bold")).pack(side="left")
+
+        btn_frame = ctk.CTkFrame(hdr, fg_color="transparent")
+        btn_frame.pack(side="right")
+        ctk.CTkButton(btn_frame, text="↻", width=36, height=32,
+                      fg_color=BRAND, hover_color=BRAND_HOVER,
+                      command=self._do_refresh).pack(side="right", padx=(4, 0))
+        ctk.CTkButton(btn_frame, text="⚙", width=36, height=32,
+                      fg_color="gray30", hover_color="gray40",
+                      command=self._open_settings).pack(side="right")
+
         fetched = self.data.get("fetched_at", "")
         if fetched:
-            _lbl(hdr, f"  {fetched[11:16]}", style="Sub.TLabel").pack(side="left", pady=(4, 0))
+            _sub_label(scroll, f"Last updated: {fetched[11:16]}").pack(
+                anchor="w", padx=16, pady=(0, 10))
 
-        # Buttons top-right
-        btn_frame = ttk.Frame(hdr)
-        btn_frame.pack(side="right")
-        ttk.Button(btn_frame, text="⚙", width=3,
-                   command=self._open_settings).pack(side="right", padx=(4, 0))
-        ttk.Button(btn_frame, text="↻", width=3,
-                   command=self._do_refresh).pack(side="right")
-
-        _sep(outer, c)
+        # ── Login banner (shown when no API key is set)
+        if not self.settings.get("api_key"):
+            banner = ctk.CTkFrame(scroll, corner_radius=10, fg_color=("#fff3e0", "#3a2a1a"))
+            banner.pack(fill="x", padx=16, pady=(0, 12))
+            inner = ctk.CTkFrame(banner, fg_color="transparent")
+            inner.pack(fill="x", padx=14, pady=10)
+            ctk.CTkLabel(inner, text="Connect your Anthropic account",
+                         font=ctk.CTkFont(size=13, weight="bold"),
+                         text_color=BRAND).pack(anchor="w")
+            ctk.CTkLabel(inner, text="Add your API key to see live cost & usage from the Anthropic Console.",
+                         font=ctk.CTkFont(size=11), text_color="gray",
+                         wraplength=340, justify="left").pack(anchor="w", pady=(2, 8))
+            btn_row = ctk.CTkFrame(inner, fg_color="transparent")
+            btn_row.pack(anchor="w")
+            ctk.CTkButton(btn_row, text="Open Anthropic Console", width=180, height=30,
+                          fg_color=BRAND, hover_color=BRAND_HOVER,
+                          font=ctk.CTkFont(size=12),
+                          command=lambda: webbrowser.open(ANTHROPIC_CONSOLE_URL)).pack(side="left")
+            ctk.CTkButton(btn_row, text="Enter API Key", width=110, height=30,
+                          fg_color="gray30", hover_color="gray40",
+                          font=ctk.CTkFont(size=12),
+                          command=self._open_settings).pack(side="left", padx=(8, 0))
 
         # ── Today card
         today = self.data.get("today", {})
-        tc = _card(outer, c)
-        tc.pack(fill="x", pady=(0, 10))
+        tc = _card(scroll)
+        tc.pack(fill="x", padx=16, pady=(0, 12))
 
-        _lbl(tc, "TODAY", style="Accent.TLabel").grid(row=0, column=0, columnspan=4,
-                                                       sticky="w", pady=(0, 8))
-        cols = [
-            ("Messages", str(today.get("total_messages", 0))),
-            ("Sessions", str(today.get("total_sessions", 0))),
-            ("Tokens", fmt_tokens(today.get("total_tokens", 0))),
-        ]
-        for i, (lbl, val) in enumerate(cols):
-            _lbl(tc, val, font=("Segoe UI", 18, "bold"),
-                 background=c["bg2"], foreground=c["fg"]).grid(
-                     row=1, column=i, sticky="w", padx=(0, 20))
-            _lbl(tc, lbl, style="Sub.TLabel").grid(row=2, column=i, sticky="w", padx=(0, 20))
+        _section_label(tc, "TODAY").pack(anchor="w", padx=14, pady=(12, 8))
+
+        stats_row = ctk.CTkFrame(tc, fg_color="transparent")
+        stats_row.pack(fill="x", padx=14, pady=(0, 4))
+
+        for val, lbl in [
+            (str(today.get("total_messages", 0)), "Messages"),
+            (str(today.get("total_sessions", 0)), "Sessions"),
+            (fmt_tokens(today.get("total_tokens", 0)), "Tokens"),
+        ]:
+            col = ctk.CTkFrame(stats_row, fg_color="transparent")
+            col.pack(side="left", padx=(0, 24))
+            _value_label(col, val).pack(anchor="w")
+            _sub_label(col, lbl).pack(anchor="w")
 
         # Per-model today
         today_models = today.get("model_usage", {})
         if today_models:
-            _sep(tc, c)
-            _lbl(tc, "Per model", style="Sub.TLabel").grid(
-                row=4, column=0, columnspan=4, sticky="w", pady=(0, 4))
-            for row_i, (model, mu) in enumerate(today_models.items(), start=5):
+            _divider(tc).pack(fill="x", padx=14, pady=8)
+            _sub_label(tc, "Per model").pack(anchor="w", padx=14, pady=(0, 6))
+            for model, mu in today_models.items():
+                row = ctk.CTkFrame(tc, fg_color="transparent")
+                row.pack(fill="x", padx=14, pady=(0, 4))
                 tok = mu.get("input_tokens", 0) + mu.get("output_tokens", 0)
                 cache = mu.get("cache_read_input_tokens", 0)
-                _lbl(tc, shorten_model(model),
-                     background=c["bg2"], foreground=c["blue"]).grid(
-                         row=row_i, column=0, sticky="w")
-                _lbl(tc, f"{mu.get('message_count', 0)} msgs",
-                     style="Sub.TLabel").grid(row=row_i, column=1, sticky="w", padx=(8, 0))
-                _lbl(tc, fmt_tokens(tok) + " tokens",
-                     style="Sub.TLabel").grid(row=row_i, column=2, sticky="w", padx=(8, 0))
-                _lbl(tc, fmt_tokens(cache) + " cached",
-                     background=c["bg2"], foreground=c["fg2"],
-                     font=("Segoe UI", 9)).grid(
-                         row=row_i, column=3, sticky="w", padx=(8, 0))
-
-        _sep(outer, c)
+                ctk.CTkLabel(row, text=shorten_model(model),
+                             font=ctk.CTkFont(size=12, weight="bold"),
+                             text_color=BRAND).pack(side="left")
+                _sub_label(row, f"  {mu.get('message_count',0)} msgs · "
+                               f"{fmt_tokens(tok)} tokens · "
+                               f"{fmt_tokens(cache)} cached").pack(side="left")
+            ctk.CTkFrame(tc, height=10, fg_color="transparent").pack()
 
         # ── All-time card
         alltime = self.data.get("alltime", {})
-        ac = _card(outer, c)
-        ac.pack(fill="x", pady=(0, 10))
+        ac = _card(scroll)
+        ac.pack(fill="x", padx=16, pady=(0, 12))
 
-        _lbl(ac, "ALL TIME", style="Accent.TLabel").grid(row=0, column=0, columnspan=4,
-                                                          sticky="w", pady=(0, 8))
-        at_cols = [
-            ("Sessions", str(alltime.get("total_sessions", 0))),
-            ("Messages", fmt_tokens(alltime.get("total_messages", 0))),
-        ]
-        for i, (lbl, val) in enumerate(at_cols):
-            _lbl(ac, val, font=("Segoe UI", 18, "bold"),
-                 background=c["bg2"], foreground=c["fg"]).grid(
-                     row=1, column=i, sticky="w", padx=(0, 20))
-            _lbl(ac, lbl, style="Sub.TLabel").grid(row=2, column=i, sticky="w", padx=(0, 20))
+        _section_label(ac, "ALL TIME").pack(anchor="w", padx=14, pady=(12, 8))
 
-        # Per-model all-time tokens
+        at_row = ctk.CTkFrame(ac, fg_color="transparent")
+        at_row.pack(fill="x", padx=14, pady=(0, 4))
+        for val, lbl in [
+            (str(alltime.get("total_sessions", 0)), "Sessions"),
+            (fmt_tokens(alltime.get("total_messages", 0)), "Messages"),
+        ]:
+            col = ctk.CTkFrame(at_row, fg_color="transparent")
+            col.pack(side="left", padx=(0, 24))
+            _value_label(col, val).pack(anchor="w")
+            _sub_label(col, lbl).pack(anchor="w")
+
         at_models = alltime.get("model_usage", {})
         if at_models:
-            _sep(ac, c)
-            _lbl(ac, "Per model", style="Sub.TLabel").grid(
-                row=4, column=0, columnspan=4, sticky="w", pady=(0, 4))
-            for row_i, (model, mu) in enumerate(at_models.items(), start=5):
-                if isinstance(mu, dict):
-                    in_t = mu.get("inputTokens") or mu.get("input_tokens", 0)
-                    out_t = mu.get("outputTokens") or mu.get("output_tokens", 0)
-                    cache_r = mu.get("cacheReadInputTokens") or mu.get("cache_read_input_tokens", 0)
-                else:
+            _divider(ac).pack(fill="x", padx=14, pady=8)
+            _sub_label(ac, "Per model").pack(anchor="w", padx=14, pady=(0, 6))
+            for model, mu in at_models.items():
+                if not isinstance(mu, dict):
                     continue
-                _lbl(ac, shorten_model(model),
-                     background=c["bg2"], foreground=c["blue"]).grid(
-                         row=row_i, column=0, sticky="w")
-                _lbl(ac, f"↑{fmt_tokens(in_t)}",
-                     style="Sub.TLabel").grid(row=row_i, column=1, sticky="w", padx=(8, 0))
-                _lbl(ac, f"↓{fmt_tokens(out_t)}",
-                     style="Sub.TLabel").grid(row=row_i, column=2, sticky="w", padx=(8, 0))
-                _lbl(ac, f"⚡{fmt_tokens(cache_r)} cached",
-                     background=c["bg2"], foreground=c["fg2"],
-                     font=("Segoe UI", 9)).grid(
-                         row=row_i, column=3, sticky="w", padx=(8, 0))
+                in_t = mu.get("inputTokens") or mu.get("input_tokens", 0)
+                out_t = mu.get("outputTokens") or mu.get("output_tokens", 0)
+                cache_r = mu.get("cacheReadInputTokens") or mu.get("cache_read_input_tokens", 0)
+                row = ctk.CTkFrame(ac, fg_color="transparent")
+                row.pack(fill="x", padx=14, pady=(0, 4))
+                ctk.CTkLabel(row, text=shorten_model(model),
+                             font=ctk.CTkFont(size=12, weight="bold"),
+                             text_color=BRAND).pack(side="left")
+                _sub_label(row, f"  ↑{fmt_tokens(in_t)} ↓{fmt_tokens(out_t)} "
+                               f"⚡{fmt_tokens(cache_r)} cached").pack(side="left")
+            ctk.CTkFrame(ac, height=10, fg_color="transparent").pack()
 
-        _sep(outer, c)
-
-        # ── Recent daily activity (mini bar chart)
+        # ── Daily activity chart
         daily = self.data.get("daily", [])
         if daily:
-            _lbl(outer, "RECENT ACTIVITY", style="Accent.TLabel").pack(anchor="w", pady=(0, 6))
-            self._draw_mini_chart(outer, daily, c)
+            dc = _card(scroll)
+            dc.pack(fill="x", padx=16, pady=(0, 16))
+            _section_label(dc, "RECENT ACTIVITY").pack(anchor="w", padx=14, pady=(12, 8))
+            self._draw_chart(dc, daily)
+            ctk.CTkFrame(dc, height=10, fg_color="transparent").pack()
 
-        root.mainloop()
+        win.mainloop()
 
-    def _draw_mini_chart(self, parent, daily: list, c: dict) -> None:
-        canvas_h = 60
-        canvas_w = 388
-        cv = tk.Canvas(parent, width=canvas_w, height=canvas_h,
-                       bg=c["bg"], highlightthickness=0)
-        cv.pack(fill="x")
+    def _draw_chart(self, parent, daily: list) -> None:
+        mode = ctk.get_appearance_mode()
+        bar_color = BRAND
+        label_color = "#888888"
+        bg = "#2b2b2b" if mode == "Dark" else "#ebebeb"
 
-        if not daily:
-            return
+        canvas = tk.Canvas(parent, height=70, bg=bg, highlightthickness=0)
+        canvas.pack(fill="x", padx=14, pady=(0, 4))
 
-        max_msgs = max((d["messageCount"] for d in daily), default=1) or 1
+        canvas.update_idletasks()
+        w = canvas.winfo_width() or 380
         n = len(daily)
-        bar_w = max(4, (canvas_w - n * 2) // n)
-        gap = 2
+        max_msgs = max((d["messageCount"] for d in daily), default=1) or 1
+        bar_w = max(4, (w - n * 3) // n)
 
         for i, day in enumerate(daily):
-            x0 = i * (bar_w + gap)
+            x0 = i * (bar_w + 3)
             x1 = x0 + bar_w
             frac = day["messageCount"] / max_msgs
-            bar_h = max(2, int(frac * (canvas_h - 14)))
-            y0 = canvas_h - 12 - bar_h
-            y1 = canvas_h - 12
-            cv.create_rectangle(x0, y0, x1, y1, fill=c["accent"], outline="")
-            if i == n - 1:
-                cv.create_text(x0, canvas_h - 2, text=day["date"][5:],
-                               fill=c["fg2"], font=("Segoe UI", 7), anchor="sw")
+            bar_h = max(3, int(frac * 48))
+            canvas.create_rectangle(x0, 52 - bar_h, x1, 52,
+                                    fill=bar_color, outline="")
+            if i == n - 1 or i == 0:
+                canvas.create_text(x0, 64, text=day["date"][5:],
+                                   fill=label_color, font=("Segoe UI", 7), anchor="w")
 
     def _open_settings(self) -> None:
-        if self.root:
-            self.root.destroy()
-            self.root = None
+        if self._win:
+            self._win.destroy()
+            self._win = None
         self.on_settings()
 
     def _do_refresh(self) -> None:
@@ -290,90 +262,145 @@ class SettingsWindow:
         self.on_cancel = on_cancel
 
     def show(self) -> None:
-        c = _palette(self.settings)
-        root = tk.Tk()
-        root.title("Settings — Claude Tray")
-        root.configure(bg=c["bg"])
-        root.resizable(False, False)
-        root.geometry("400x340")
-        root.update_idletasks()
-        sw = root.winfo_screenwidth()
-        sh = root.winfo_screenheight()
-        root.geometry(f"400x340+{(sw-400)//2}+{(sh-340)//2}")
-        _apply_theme(root, c)
+        _apply_appearance(self.settings)
 
-        outer = ttk.Frame(root, padding=20)
-        outer.pack(fill="both", expand=True)
+        win = ctk.CTk()
+        win.title("Settings — Claude Tray")
+        win.geometry("460x560")
+        win.resizable(False, False)
+        win.update_idletasks()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        win.geometry(f"460x560+{(sw-460)//2}+{(sh-560)//2}")
 
-        _lbl(outer, "Settings", style="Header.TLabel").pack(anchor="w", pady=(0, 16))
+        outer = ctk.CTkScrollableFrame(win, corner_radius=0)
+        outer.pack(fill="both", expand=True, padx=0, pady=0)
+
+        ctk.CTkLabel(outer, text="Settings",
+                     font=ctk.CTkFont(size=20, weight="bold")).pack(
+                         anchor="w", padx=20, pady=(20, 16))
+
+        # ── General card
+        gen = _card(outer)
+        gen.pack(fill="x", padx=16, pady=(0, 12))
+        _section_label(gen, "GENERAL").pack(anchor="w", padx=14, pady=(12, 10))
 
         # Refresh interval
-        ri_frame = ttk.Frame(outer)
-        ri_frame.pack(fill="x", pady=6)
-        _lbl(ri_frame, "Refresh interval (minutes):").pack(side="left")
+        ri_row = ctk.CTkFrame(gen, fg_color="transparent")
+        ri_row.pack(fill="x", padx=14, pady=(0, 10))
+        ctk.CTkLabel(ri_row, text="Refresh interval (minutes)").pack(side="left")
         self._interval_var = tk.IntVar(value=self.settings.get("refresh_interval_minutes", 3))
-        ttk.Spinbox(ri_frame, from_=1, to=60, width=6,
-                    textvariable=self._interval_var).pack(side="right")
-
-        # Claude dir
-        dir_frame = ttk.Frame(outer)
-        dir_frame.pack(fill="x", pady=6)
-        _lbl(dir_frame, "Claude data directory:").pack(anchor="w")
-        path_row = ttk.Frame(dir_frame)
-        path_row.pack(fill="x", pady=(4, 0))
-        self._dir_var = tk.StringVar(value=self.settings.get("claude_dir", ""))
-        ttk.Entry(path_row, textvariable=self._dir_var).pack(side="left", fill="x", expand=True)
-        ttk.Button(path_row, text="Browse…", width=8,
-                   command=self._browse).pack(side="right", padx=(6, 0))
-        _lbl(dir_frame, "Leave blank to auto-detect (~/.claude)",
-             style="Sub.TLabel").pack(anchor="w", pady=(2, 0))
+        ctk.CTkEntry(ri_row, textvariable=self._interval_var,
+                     width=60, justify="center").pack(side="right")
 
         # Theme
-        theme_frame = ttk.Frame(outer)
-        theme_frame.pack(fill="x", pady=6)
-        _lbl(theme_frame, "Theme:").pack(side="left")
-        self._theme_var = tk.StringVar(value=self.settings.get("theme", "dark"))
-        ttk.Combobox(theme_frame, textvariable=self._theme_var,
-                     values=["dark", "light"], state="readonly", width=8).pack(side="right")
+        theme_row = ctk.CTkFrame(gen, fg_color="transparent")
+        theme_row.pack(fill="x", padx=14, pady=(0, 10))
+        ctk.CTkLabel(theme_row, text="Theme").pack(side="left")
+        self._theme_var = tk.StringVar(value=self.settings.get("theme", "dark").capitalize())
+        ctk.CTkOptionMenu(theme_row, variable=self._theme_var,
+                          values=["Dark", "Light", "System"],
+                          fg_color=BRAND, button_color=BRAND_HOVER,
+                          width=100).pack(side="right")
 
         # Start minimized
         self._minimized_var = tk.BooleanVar(value=self.settings.get("start_minimized", True))
-        ttk.Checkbutton(outer, text="Start minimized to tray",
-                        variable=self._minimized_var).pack(anchor="w", pady=4)
+        ctk.CTkCheckBox(gen, text="Start minimized to tray",
+                        variable=self._minimized_var,
+                        fg_color=BRAND, hover_color=BRAND_HOVER).pack(
+                            anchor="w", padx=14, pady=(0, 10))
 
         # Notifications
         self._notif_var = tk.BooleanVar(value=self.settings.get("show_notifications", True))
-        ttk.Checkbutton(outer, text="Show refresh notifications",
-                        variable=self._notif_var).pack(anchor="w", pady=4)
+        ctk.CTkCheckBox(gen, text="Show refresh notifications",
+                        variable=self._notif_var,
+                        fg_color=BRAND, hover_color=BRAND_HOVER).pack(
+                            anchor="w", padx=14, pady=(0, 12))
 
-        _sep(outer, c)
+        # ── Data source card
+        ds = _card(outer)
+        ds.pack(fill="x", padx=16, pady=(0, 12))
+        _section_label(ds, "DATA SOURCE").pack(anchor="w", padx=14, pady=(12, 10))
 
-        # Buttons
-        btn_row = ttk.Frame(outer)
-        btn_row.pack(fill="x")
-        ttk.Button(btn_row, text="Cancel",
-                   command=lambda: self._cancel(root)).pack(side="right", padx=(6, 0))
-        ttk.Button(btn_row, text="Save",
-                   command=lambda: self._save(root)).pack(side="right")
+        ctk.CTkLabel(ds, text="Claude data directory",
+                     font=ctk.CTkFont(size=13)).pack(anchor="w", padx=14)
+        dir_row = ctk.CTkFrame(ds, fg_color="transparent")
+        dir_row.pack(fill="x", padx=14, pady=(4, 2))
+        self._dir_var = tk.StringVar(value=self.settings.get("claude_dir", ""))
+        ctk.CTkEntry(dir_row, textvariable=self._dir_var,
+                     placeholder_text="Auto-detect (~/.claude)").pack(
+                         side="left", fill="x", expand=True)
+        ctk.CTkButton(dir_row, text="Browse", width=80,
+                      fg_color=BRAND, hover_color=BRAND_HOVER,
+                      command=self._browse).pack(side="right", padx=(8, 0))
+        _sub_label(ds, "Leave blank to use the default ~/.claude directory").pack(
+            anchor="w", padx=14, pady=(0, 12))
 
-        root.mainloop()
+        # ── Credentials card
+        cred = _card(outer)
+        cred.pack(fill="x", padx=16, pady=(0, 12))
+        _section_label(cred, "ANTHROPIC CREDENTIALS").pack(anchor="w", padx=14, pady=(12, 10))
+
+        ctk.CTkLabel(cred, text="API Key",
+                     font=ctk.CTkFont(size=13)).pack(anchor="w", padx=14)
+        self._apikey_var = tk.StringVar(value=self.settings.get("api_key", ""))
+        ctk.CTkEntry(cred, textvariable=self._apikey_var,
+                     placeholder_text="sk-ant-...",
+                     show="•").pack(fill="x", padx=14, pady=(4, 2))
+        _sub_label(cred, "Optional — used to fetch live usage & cost from the Anthropic API").pack(
+            anchor="w", padx=14)
+
+        # Show/hide key toggle
+        self._show_key = False
+        self._key_entry_ref = cred.winfo_children()[-2]  # the entry above
+
+        ctk.CTkButton(cred, text="Show / Hide key", height=28,
+                      fg_color="gray30", hover_color="gray40",
+                      font=ctk.CTkFont(size=12),
+                      command=lambda: self._toggle_key_vis()).pack(
+                          anchor="w", padx=14, pady=(4, 12))
+
+        # ── Buttons
+        btn_row = ctk.CTkFrame(outer, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(4, 20))
+        ctk.CTkButton(btn_row, text="Cancel", width=100,
+                      fg_color="gray30", hover_color="gray40",
+                      command=lambda: self._cancel(win)).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(btn_row, text="Save", width=100,
+                      fg_color=BRAND, hover_color=BRAND_HOVER,
+                      command=lambda: self._save(win)).pack(side="right")
+
+        win.mainloop()
+
+    def _toggle_key_vis(self) -> None:
+        self._show_key = not self._show_key
+        # find the CTkEntry for the api key
+        try:
+            self._key_entry_ref.configure(show="" if self._show_key else "•")
+        except Exception:
+            pass
 
     def _browse(self) -> None:
+        from tkinter import filedialog
         d = filedialog.askdirectory(title="Select Claude data directory")
         if d:
             self._dir_var.set(d)
 
-    def _save(self, root: tk.Tk) -> None:
+    def _save(self, win: ctk.CTk) -> None:
         updated = dict(self.settings)
-        updated["refresh_interval_minutes"] = max(1, min(60, self._interval_var.get()))
+        try:
+            interval = max(1, min(60, int(self._interval_var.get())))
+        except (ValueError, tk.TclError):
+            interval = 3
+        updated["refresh_interval_minutes"] = interval
         updated["claude_dir"] = self._dir_var.get().strip()
-        updated["theme"] = self._theme_var.get()
+        updated["theme"] = self._theme_var.get().lower()
         updated["start_minimized"] = self._minimized_var.get()
         updated["show_notifications"] = self._notif_var.get()
+        updated["api_key"] = self._apikey_var.get().strip()
         config.save(updated)
-        root.destroy()
+        win.destroy()
         self.on_save(updated)
 
-    def _cancel(self, root: tk.Tk) -> None:
-        root.destroy()
+    def _cancel(self, win: ctk.CTk) -> None:
+        win.destroy()
         self.on_cancel()
