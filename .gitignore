@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App settings (user-local, not shared)
+# ~/.claude-tray/ is stored outside the repo
+
+# PyInstaller output
+*.exe
+
+# Claude Code local session data (not part of the project)
+.claude/
