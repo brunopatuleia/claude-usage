@@ -50,10 +50,11 @@ def _divider(parent) -> ctk.CTkFrame:
 # ── Stats Window ─────────────────────────────────────────────────────────────
 
 class StatsWindow:
-    def __init__(self, settings: dict, data: dict,
+    def __init__(self, settings: dict, local_data: dict, plan_data: dict,
                  on_settings: Callable, on_refresh: Callable) -> None:
         self.settings = settings
-        self.data = data
+        self.data = local_data
+        self.plan = plan_data
         self.on_settings = on_settings
         self.on_refresh = on_refresh
         self._win: ctk.CTk | None = None
@@ -65,8 +66,9 @@ class StatsWindow:
             return
         self._build()
 
-    def update_data(self, data: dict) -> None:
-        self.data = data
+    def update_data(self, local_data: dict, plan_data: dict) -> None:
+        self.data = local_data
+        self.plan = plan_data
         if self._win and self._win.winfo_exists():
             self._win.destroy()
             self._build()
@@ -108,8 +110,58 @@ class StatsWindow:
             _sub_label(scroll, f"Last updated: {fetched[11:16]}").pack(
                 anchor="w", padx=16, pady=(0, 10))
 
-        # ── Login banner (shown when no API key is set)
-        if not self.settings.get("api_key"):
+        # ── Plan usage card (shown when logged in)
+        plan = self.plan
+        if plan.get("logged_in") and not plan.get("error"):
+            pc = _card(scroll)
+            pc.pack(fill="x", padx=16, pady=(0, 12))
+            _section_label(pc, "PLAN USAGE").pack(anchor="w", padx=14, pady=(12, 8))
+
+            for label, pct, reset_lbl in [
+                ("Current session", plan.get("session_pct", 0), plan.get("session_resets_in", "")),
+                ("Weekly (all models)", plan.get("weekly_pct", 0), plan.get("weekly_resets_at", "")),
+            ]:
+                row = ctk.CTkFrame(pc, fg_color="transparent")
+                row.pack(fill="x", padx=14, pady=(0, 8))
+                top = ctk.CTkFrame(row, fg_color="transparent")
+                top.pack(fill="x")
+                ctk.CTkLabel(top, text=label,
+                             font=ctk.CTkFont(size=12)).pack(side="left")
+                pct_color = ("#f38b8b" if pct >= 80 else
+                             "#f9e24f" if pct >= 55 else "#a6e3a1")
+                ctk.CTkLabel(top, text=f"{pct:.0f}% used",
+                             font=ctk.CTkFont(size=12, weight="bold"),
+                             text_color=pct_color).pack(side="right")
+                bar_color = ("#f38b8b" if pct >= 80 else
+                             "#f9e24f" if pct >= 55 else "#a6e3a1")
+                ctk.CTkProgressBar(row, progress_color=bar_color,
+                                   height=8, corner_radius=4).pack(
+                    fill="x", pady=(4, 0)
+                ).set(min(pct / 100, 1.0))
+                if reset_lbl:
+                    _sub_label(row, f"Resets: {reset_lbl}").pack(anchor="w", pady=(2, 0))
+
+            # Extra usage / balance
+            extra = plan.get("extra_spent_usd", 0)
+            limit = plan.get("extra_limit_usd", 0)
+            bal   = plan.get("balance_usd", 0)
+            if bal or limit:
+                _divider(pc).pack(fill="x", padx=14, pady=6)
+                b_row = ctk.CTkFrame(pc, fg_color="transparent")
+                b_row.pack(fill="x", padx=14, pady=(0, 12))
+                if bal:
+                    col = ctk.CTkFrame(b_row, fg_color="transparent")
+                    col.pack(side="left", padx=(0, 24))
+                    _value_label(col, f"${bal:.2f}", size=18).pack(anchor="w")
+                    _sub_label(col, "Balance").pack(anchor="w")
+                if limit:
+                    col2 = ctk.CTkFrame(b_row, fg_color="transparent")
+                    col2.pack(side="left")
+                    _value_label(col2, f"${extra:.2f} / ${limit:.0f}", size=18).pack(anchor="w")
+                    _sub_label(col2, "Extra usage").pack(anchor="w")
+
+        # ── Login banner (shown when not authenticated)
+        if not plan.get("logged_in"):
             banner = ctk.CTkFrame(scroll, corner_radius=10, fg_color=("#fff3e0", "#3a2a1a"))
             banner.pack(fill="x", padx=16, pady=(0, 12))
             inner = ctk.CTkFrame(banner, fg_color="transparent")
