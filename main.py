@@ -21,6 +21,7 @@ import config
 import reader
 import claude_api
 from ui import StatsWindow, SettingsWindow
+from watcher import ProjectWatcher
 
 
 # ── Icon generation ──────────────────────────────────────────────────────────
@@ -145,12 +146,36 @@ class TrayApp:
         self._tray: pystray.Icon | None = None
         self._stats_win: StatsWindow | None = None
         self._lock = threading.Lock()
+        self._plan_fetched_at: float = 0  # epoch seconds
 
         threading.Thread(target=self._fetch_and_update, daemon=True).start()
 
+        # File watcher — fires _on_files_changed whenever Claude Code writes new data
+        claude_dir = config.get_claude_dir(self.settings)
+        self._watcher = ProjectWatcher(claude_dir, self._on_files_changed)
+        self._watcher.start()
+
     # ── Data fetch ───────────────────────────────────────────────────────────
 
+    def _fetch_local(self) -> None:
+        """Fast update — re-reads local JSONL files only. Called on file change."""
+        claude_dir = config.get_claude_dir(self.settings)
+        try:
+            local = reader.fetch_usage(claude_dir)
+        except Exception as exc:
+            local = {"error": str(exc), "today": {}, "alltime": {}, "daily": []}
+
+        with self._lock:
+            self.local_data = local
+            plan = self.plan_data
+
+        self._update_tray_icon()
+        if self._stats_win is not None:
+            self._stats_win.update_data(local, plan)
+
     def _fetch_and_update(self) -> None:
+        """Full update — re-reads local files AND fetches plan usage from claude.ai."""
+        import time
         claude_dir = config.get_claude_dir(self.settings)
         try:
             local = reader.fetch_usage(claude_dir)
@@ -165,11 +190,20 @@ class TrayApp:
         with self._lock:
             self.local_data = local
             self.plan_data  = plan
+            self._plan_fetched_at = time.time()
 
         self._update_tray_icon()
-
         if self._stats_win is not None:
             self._stats_win.update_data(local, plan)
+
+    def _on_files_changed(self) -> None:
+        """Called by the file watcher seconds after Claude Code writes new data."""
+        import time
+        self._fetch_local()
+        # Also refresh plan data if it's been more than the interval since last full fetch
+        interval = self.settings.get("refresh_interval_minutes", 3) * 60
+        if time.time() - self._plan_fetched_at > interval:
+            threading.Thread(target=self._fetch_and_update, daemon=True).start()
 
     def _refresh_loop(self) -> None:
         while True:
@@ -251,6 +285,7 @@ class TrayApp:
         ).show()
 
     def _on_exit(self, icon=None, item=None) -> None:
+        self._watcher.stop()
         if self._tray:
             self._tray.stop()
 

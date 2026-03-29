@@ -18,9 +18,11 @@ TRAY_CONFIG_FILE = Path.home() / ".claude-tray" / "settings.json"
 
 def _load_session_key() -> Optional[str]:
     """
-    Returns the claude.ai sessionKey cookie if the user has configured it.
-    This is separate from the OAuth token — it comes from the browser session.
+    Returns the claude.ai sessionKey. Priority:
+    1. Manually configured in settings
+    2. Auto-extracted from Chrome/Edge browser cookies
     """
+    # 1. Manual config
     if TRAY_CONFIG_FILE.exists():
         try:
             with open(TRAY_CONFIG_FILE, encoding="utf-8") as f:
@@ -30,6 +32,16 @@ def _load_session_key() -> Optional[str]:
                 return sk
         except (json.JSONDecodeError, OSError):
             pass
+
+    # 2. Auto-extract from browser
+    try:
+        import browser_cookie
+        sk = browser_cookie.get_session_key()
+        if sk:
+            return sk
+    except Exception:
+        pass
+
     return None
 
 
