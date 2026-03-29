@@ -1,0 +1,51 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"          # triggers on v1.0.0, v1.2.3, etc.
+  workflow_dispatch:  # manual trigger from GitHub Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build executable (PyInstaller)
+        run: python build.py --exe
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer (Inno Setup)
+        run: python build.py --installer
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeUsageTray-Windows
+          path: |
+            dist/ClaudeUsageTray.exe
+            dist/ClaudeUsageTray-Setup-*.exe
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ClaudeUsageTray.exe
+            dist/ClaudeUsageTray-Setup-*.exe
+          generate_release_notes: true
